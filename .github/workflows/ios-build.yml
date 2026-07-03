@@ -1,0 +1,44 @@
+name: Build Unsigned iOS App
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout Project Source Code
+        uses: actions/checkout@v4
+
+      - name: Configure Java Environment
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '17'
+
+      - name: Configure Flutter SDK Environment
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          architecture: x64
+
+      - name: Download Flutter Dependencies
+        run: flutter pub get
+
+      - name: Compile App Payload
+        run: |
+          # Build a raw app bundle without a Mac certificate requirement
+          flutter build ios --release --no-codesign
+          cd ios
+          mkdir -p Payload
+          cp -r ../build/ios/Release-iphoneos/Runner.app Payload/
+          zip -r ../build/ios/Runner.ipa Payload/
+
+      - name: Upload Output Application File
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-app
+          path: build/ios/Runner.ipa
