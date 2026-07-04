@@ -87,23 +87,34 @@ class BluetoothService extends ChangeNotifier {
       _isScanning = true;
       notifyListeners();
 
+      // Scan with the Bridge service UUID filter
+      // This finds devices advertising the Bridge service
       await fbp.FlutterBluePlus.startScan(
         withServices: [fbp.Guid(bridgeServiceUuid)],
-        timeout: const Duration(seconds: 10),
+        timeout: const Duration(seconds: 30), // Extended timeout to 30 seconds
       );
+
+      debugPrint('Started scanning for Bridge devices...');
 
       // Listen for scan results
       await _scanSubscription?.cancel();
       _scanSubscription = fbp.FlutterBluePlus.scanResults.listen((results) {
+        debugPrint('Found ${results.length} devices');
         final devices = results
             .map((r) => r.device)
             .toSet()
             .toList(); // Remove duplicates
+
+        // Log discovered devices
+        for (var device in devices) {
+          debugPrint('  - ${device.platformName} (${device.remoteId.str})');
+        }
+
         _discoveredDevicesStream.add(devices);
       });
 
       // Stop scanning after timeout
-      await Future.delayed(const Duration(seconds: 10));
+      await Future.delayed(const Duration(seconds: 30));
       await stopScan();
     } catch (e) {
       _isScanning = false;

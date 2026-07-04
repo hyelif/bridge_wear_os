@@ -28,6 +28,11 @@ jobs:
       - name: Download Flutter Dependencies
         run: flutter pub get
 
+      - name: Install iOS CocoaPods Dependencies
+        run: |
+          cd ios
+          pod install
+
       - name: Compile App Payload
         run: |
           # Build a raw app bundle without a Mac certificate requirement

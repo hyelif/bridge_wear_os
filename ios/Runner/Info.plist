@@ -78,5 +78,11 @@
 		<string>_bridge._tcp</string>
 		<string>_bridge._udp</string>
 	</array>
+	<!-- Background Modes for BLE Peripheral -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+	</array>
 </dict>
 </plist>

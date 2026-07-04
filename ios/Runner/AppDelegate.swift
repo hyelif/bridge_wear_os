@@ -4,12 +4,14 @@ import CoreBluetooth
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
-  private var bridgeBluetoothManager: AppBridgeBluetoothManager?
+  // Keep the manager alive - must be stored as property
+  var bridgeBluetoothManager: AppBridgeBluetoothManager?
 
   override func application(
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
+    // Initialize and keep reference to prevent deallocation
     bridgeBluetoothManager = AppBridgeBluetoothManager()
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
