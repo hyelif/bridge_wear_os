@@ -35,15 +35,16 @@ jobs:
 
       - name: Compile App Payload
         run: |
-          # Build a raw app bundle without a Mac certificate requirement
+          # Build unsigned IPA for SideStore
           flutter build ios --release --no-codesign
           cd ios
           mkdir -p Payload
           cp -r ../build/ios/Release-iphoneos/Runner.app Payload/
           zip -r ../build/ios/Runner.ipa Payload/
 
-      - name: Upload Output Application File
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: unsigned-app
+          name: bridge-app-unsigned
           path: build/ios/Runner.ipa
+          if-no-files-found: error

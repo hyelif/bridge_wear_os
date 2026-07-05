@@ -3,21 +3,21 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:bridge_wear_os/models/bridge_message.dart';
-import 'package:bridge_wear_os/services/bluetooth_service.dart';
 import 'package:bridge_wear_os/services/bridge_manager.dart';
 import 'package:bridge_wear_os/screens/device_discovery_screen.dart';
 import 'package:bridge_wear_os/utils/responsive_utils.dart';
+import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
 
-class BridgeScreen extends StatefulWidget {
+class BridgeScreen extends ConsumerStatefulWidget {
   const BridgeScreen({super.key});
 
   @override
-  State<BridgeScreen> createState() => _BridgeScreenState();
+  ConsumerState<BridgeScreen> createState() => _BridgeScreenState();
 }
 
-class _BridgeScreenState extends State<BridgeScreen> {
+class _BridgeScreenState extends ConsumerState<BridgeScreen> {
   late BridgeManager _bridgeManager;
   final TextEditingController _messageController = TextEditingController();
   final TextEditingController _titleController = TextEditingController();
@@ -31,10 +31,7 @@ class _BridgeScreenState extends State<BridgeScreen> {
   }
 
   void _initializeBridge() {
-    final bluetoothService = Provider.of<BluetoothService>(
-      context,
-      listen: false,
-    );
+    final bluetoothService = ref.read(bluetoothServiceProvider);
     _bridgeManager = BridgeManager(bluetoothService);
 
     // Listen to incoming messages
@@ -113,10 +110,7 @@ class _BridgeScreenState extends State<BridgeScreen> {
   }
 
   Future<void> _disconnect() async {
-    final bluetoothService = Provider.of<BluetoothService>(
-      context,
-      listen: false,
-    );
+    final bluetoothService = ref.read(bluetoothServiceProvider);
     _bridgeManager.dispose();
     await bluetoothService.disconnect();
 
@@ -222,8 +216,9 @@ class _BridgeScreenState extends State<BridgeScreen> {
   }
 
   Widget _buildConnectionStatus() {
-    return Consumer<BluetoothService>(
-      builder: (context, bluetoothService, child) {
+    return Consumer(
+      builder: (context, ref, child) {
+        final bluetoothService = ref.watch(bluetoothServiceProvider);
         return StreamBuilder<bool>(
           stream: bluetoothService.connectionState,
           builder: (context, snapshot) {

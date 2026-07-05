@@ -177,7 +177,7 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
 
   // Handle read requests from watch
   func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
-    print("[BLE] Read request: \(request.characteristic?.uuid ?? CBUUID(string: "unknown"))")
+    print("[BLE] Read request: \(request.characteristic.uuid)")
 
     // Return simple response
     let response = "Bridge-iPhone".data(using: .utf8)
@@ -188,7 +188,7 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
   // Handle write requests from watch
   func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
     for request in requests {
-      print("[BLE] Write request: \(request.characteristic?.uuid ?? CBUUID(string: "unknown"))")
+      print("[BLE] Write request: \(request.characteristic.uuid)")
 
       if let data = request.value {
         print("[BLE] Received \(data.count) bytes")

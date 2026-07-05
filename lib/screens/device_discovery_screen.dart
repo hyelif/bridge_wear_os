@@ -3,19 +3,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
-import 'package:provider/provider.dart';
-import 'package:bridge_wear_os/services/bluetooth_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:bridge_wear_os/screens/bridge_screen.dart';
 import 'package:bridge_wear_os/utils/responsive_utils.dart';
+import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
 
-class DeviceDiscoveryScreen extends StatefulWidget {
+class DeviceDiscoveryScreen extends ConsumerStatefulWidget {
   const DeviceDiscoveryScreen({super.key});
 
   @override
-  State<DeviceDiscoveryScreen> createState() => _DeviceDiscoveryScreenState();
+  ConsumerState<DeviceDiscoveryScreen> createState() => _DeviceDiscoveryScreenState();
 }
 
-class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
+class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
   List<fbp.BluetoothDevice> _discoveredDevices = [];
   final Map<String, int> _deviceRssi = {};
   bool _isConnecting = false;
@@ -55,7 +55,7 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
       return;
     }
 
-    final service = Provider.of<BluetoothService>(context, listen: false);
+    final service = ref.read(bluetoothServiceProvider);
 
     setState(() {
       _discoveredDevices = [];
@@ -115,7 +115,7 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
   }
 
   void _toggleShowAllDevices() {
-    final service = Provider.of<BluetoothService>(context, listen: false);
+    final service = ref.read(bluetoothServiceProvider);
     setState(() {
       _showAllDevices = !_showAllDevices;
     });
@@ -131,7 +131,7 @@ class _DeviceDiscoveryScreenState extends State<DeviceDiscoveryScreen> {
       _connectionStatus = 'Connecting...';
     });
 
-    final service = Provider.of<BluetoothService>(context, listen: false);
+    final service = ref.read(bluetoothServiceProvider);
 
     setState(() {
       _connectionStatus = 'Connecting to ${device.platformName}...';
