@@ -7,9 +7,11 @@ plugins {
 android {
     namespace = "com.example.bridge_wear_os"
     compileSdk = flutter.compileSdkVersion
+    compileSdkExtension = 19
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -42,4 +44,9 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    // Required for flutter_local_notifications (core library desugaring)
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

@@ -73,11 +73,11 @@ BLE bridge app connecting Wear OS watch (Samsung SM300/Watch 7) to iPhone. Watch
 
 | File | Status | Description |
 |------|--------|-------------|
-| `ios/Runner/AppDelegate.swift` | ✅ Complete | BridgePeripheralManager: CBPeripheralManagerDelegate, advertises as "Bridge-iPhone", handles read/write/subscribe, Flutter MethodChannel bridge, advertising power management (LOW_POWER/LOW_LATENCY), 60s timeout + 30s retry, deferred BLE setup for iOS 13+ |
+| `ios/Runner/AppDelegate.swift` | ✅ Complete | BridgePeripheralManager: CBPeripheralManagerDelegate, advertises as "Bridge-iPhone", handles read/write/subscribe, Flutter MethodChannel bridge, advertising power management (LOW_POWER/LOW_LATENCY), 60s timeout + 30s retry, deferred BLE setup for iOS 13+. **Notification forwarding:** UNUserNotificationCenterDelegate, per-app allowlist, BLE forward, dismiss handler |
 | `ios/Runner/BridgeBluetoothManager.swift` | 🗑️ Deprecated | Dead code — comment header points to AppDelegate.swift |
 | `ios/Runner/Info.plist` | ✅ Complete | NSBluetoothAlwaysUsageDescription, NSBluetoothPeripheralUsageDescription, NSBluetoothCentralUsageDescription, UIBackgroundModes (bluetooth-central, bluetooth-peripheral) |
 | `ios/Runner/SceneDelegate.swift` | ✅ Complete | Empty FlutterSceneDelegate |
-| `ios/Podfile` | ✅ Complete | Standard Flutter iOS Podfile, platform :ios, '13.0' |
+| `ios/Podfile` | ✅ Complete | Standard Flutter iOS Podfile, **platform :ios, '15.0'** (bumped from 13.0 for health-connector-hk-ios) |
 
 ### Android Native
 
@@ -188,6 +188,8 @@ BLE bridge app connecting Wear OS watch (Samsung SM300/Watch 7) to iPhone. Watch
 5. **Health Connect requires API 26+** — minSdk raised to 26. Older watches (pre-Android 8) won't support health data.
 6. **Health Connect app required** — watch must have Health Connect installed (Samsung Health syncs to it).
 7. **No real-time HR streaming** — health data reads from Health Connect (historical), not live sensor streaming. Real-time HR requires active workout session.
+8. **iOS 15.0 minimum** — `health-connector-hk-ios` requires iOS 15+. iPhone 6s and older not supported.
+9. **health_connector_hc_android KGP warning** — plugin applies Kotlin Gradle Plugin directly. Future Flutter versions may break. Monitor for updates.
 
 ---
 
