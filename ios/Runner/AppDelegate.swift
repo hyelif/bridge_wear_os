@@ -4,7 +4,7 @@ import CoreBluetooth
 import UserNotifications
 
 @main
-@objc class AppDelegate: FlutterAppDelegate, UNUserNotificationCenterDelegate {
+@objc class AppDelegate: FlutterAppDelegate {
   var bridgeManager: BridgePeripheralManager?
 
   override func application(
@@ -17,9 +17,14 @@ import UserNotifications
     UNUserNotificationCenter.current().delegate = self
     UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
       if let error = error {
-        print("[NOTIF] Authorization error: \(error)")
+        print("[NOTIF] Authorization error: \(error.localizedDescription)")
       } else {
         print("[NOTIF] Authorization granted: \(granted)")
+        if granted {
+          DispatchQueue.main.async {
+            application.registerForRemoteNotifications()
+          }
+        }
       }
     }
 
@@ -116,7 +121,12 @@ import UserNotifications
         }
         UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
           let identifiers = notifications
-            .filter { $0.request.content.categoryIdentifier == bundleId }
+            .filter { notif in
+              let source = notif.request.content.userInfo["sourceApp"] as? String
+                ?? notif.request.content.userInfo["appBundleId"] as? String
+                ?? notif.request.content.categoryIdentifier
+              return source == bundleId
+            }
             .map { $0.request.identifier }
           UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
         }
@@ -132,7 +142,7 @@ import UserNotifications
 
   // MARK: - UNUserNotificationCenterDelegate
 
-  func userNotificationCenter(_ center: UNUserNotificationCenter,
+  override func userNotificationCenter(_ center: UNUserNotificationCenter,
                               willPresent notification: UNNotification,
                               withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
     let content = notification.request.content
@@ -145,7 +155,7 @@ import UserNotifications
     completionHandler([.banner, .sound])
   }
 
-  func userNotificationCenter(_ center: UNUserNotificationCenter,
+  override func userNotificationCenter(_ center: UNUserNotificationCenter,
                               didReceive response: UNNotificationResponse,
                               withCompletionHandler completionHandler: @escaping () -> Void) {
     completionHandler()
@@ -156,17 +166,24 @@ import UserNotifications
   private let allowedAppsKey = "allowed_notification_apps"
 
   private func forwardNotificationToWatch(_ content: UNNotificationContent) {
+    // Extract bundle ID from notification request — use categoryIdentifier as fallback
+    let bundleId = content.userInfo["sourceApp"] as? String
+      ?? content.userInfo["appBundleId"] as? String
+      ?? content.categoryIdentifier
+
+    let appName = content.userInfo["appName"] as? String ?? bundleId
+
     let payload: [String: Any] = [
       "title": content.title,
       "body": content.body,
-      "appName": content.userInfo["appName"] as? String ?? content.categoryIdentifier,
-      "appBundleId": content.userInfo["sourceApp"] as? String ?? "unknown",
+      "appName": appName,
+      "appBundleId": bundleId,
       "timestamp": ISO8601DateFormatter().string(from: Date()),
     ]
 
     // Check per-app allowlist before forwarding
-    guard isAppAllowed(content.categoryIdentifier) else {
-      print("[NOTIF] App not in allowlist, skipping: \(content.categoryIdentifier)")
+    guard isAppAllowed(bundleId) else {
+      print("[NOTIF] App not in allowlist, skipping: \(bundleId)")
       return
     }
 
@@ -237,14 +254,31 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       print("[BLE] Powered on - setting up service")
       setupService()
     case .poweredOff:
-      print("[BLE] Bluetooth off")
+      print("[BLE] Bluetooth off — enable Bluetooth to use Bridge")
       cancelAllTimers()
     case .unauthorized:
-      print("[BLE] Unauthorized - check Info.plist")
+      let msg: String
+      if #available(iOS 13.0, *) {
+        switch CBManager.authorization {
+        case .restricted:
+          msg = "Bluetooth restricted (parental controls)"
+        case .denied:
+          msg = "Bluetooth denied — enable in Settings > Privacy > Bluetooth"
+        case .allowedAlways:
+          msg = "Bluetooth authorized"
+        @unknown default:
+          msg = "Unknown authorization state"
+        }
+      } else {
+        msg = "Unauthorized — check Info.plist"
+      }
+      print("[BLE] \(msg)")
     case .unsupported:
-      print("[BLE] Unsupported")
-    default:
-      break
+      print("[BLE] Bluetooth LE not supported on this device")
+    case .resetting:
+      print("[BLE] Bluetooth resetting — will retry")
+    @unknown default:
+      print("[BLE] Unknown state: \(peripheral.state.rawValue)")
     }
   }
 
@@ -339,15 +373,14 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       self.advertisingTimeoutTimer?.invalidate()
       self.advertisingTimeoutTimer = Timer.scheduledTimer(
         timeInterval: BridgePeripheralManager.advertisingTimeout,
-        target: self,
-        selector: #selector(self.advertisingTimedOut),
-        userInfo: nil,
         repeats: false
-      )
+      ) { [weak self] _ in
+        self?.advertisingTimedOut()
+      }
     }
   }
 
-  @objc private func advertisingTimedOut() {
+  private func advertisingTimedOut() {
     print("[BLE] Advertising timed out (60s) — no central connected")
 
     guard let manager = peripheralManager else { return }
@@ -364,16 +397,15 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       self.retryTimer?.invalidate()
       self.retryTimer = Timer.scheduledTimer(
         timeInterval: BridgePeripheralManager.retryPause,
-        target: self,
-        selector: #selector(self.retryAdvertising),
-        userInfo: nil,
         repeats: false
-      )
+      ) { [weak self] _ in
+        self?.retryAdvertising()
+      }
     }
     print("[BLE] Retry scheduled in \(BridgePeripheralManager.retryPause)s")
   }
 
-  @objc private func retryAdvertising() {
+  private func retryAdvertising() {
     guard isServiceReady else {
       print("[BLE] Cannot retry: service not ready")
       return
@@ -395,23 +427,22 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
   // Handle write requests from watch
   func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveWrite requests: [CBATTRequest]) {
     for request in requests {
-      print("[BLE] Write request: \(request.characteristic.uuid)")
+      guard let data = request.value else {
+        print("[BLE] Write request with no data")
+        peripheral.respond(to: request, withResult: .invalidAttributeValueLength)
+        continue
+      }
 
-      if let data = request.value {
-        print("[BLE] Received \(data.count) bytes")
-        if let text = String(data: data, encoding: .utf8) {
-          print("[BLE] Data: \(text)")
-        }
+      print("[BLE] Received \(data.count) bytes on \(request.characteristic.uuid)")
 
-        // Forward the raw data to Flutter via the method channel
-        if let channel = flutterChannel {
-          // Try to parse as JSON for structured forwarding
-          if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            channel.invokeMethod("onMessage", arguments: json)
-          } else if let text = String(data: data, encoding: .utf8) {
-            // Fall back to plain string
-            channel.invokeMethod("onMessage", arguments: ["text": text])
-          }
+      // Forward the raw data to Flutter via the method channel
+      if let channel = flutterChannel {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+          channel.invokeMethod("onMessage", arguments: json)
+        } else if let text = String(data: data, encoding: .utf8) {
+          channel.invokeMethod("onMessage", arguments: ["text": text])
+        } else {
+          print("[BLE] Unrecognized data format")
         }
       }
 
@@ -475,13 +506,18 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       return
     }
 
+    let centrals: [CBCentral]? = subscribedCentral.map { [$0] }
     let success = manager.updateValue(
       jsonData,
       for: characteristic,
-      onSubscribedCentrals: subscribedCentral != nil ? [subscribedCentral!] : nil
+      onSubscribedCentrals: centrals
     )
 
-    print("[BLE] Send result: \(success)")
+    if !success {
+      print("[BLE] Send failed — characteristic update queue full")
+    } else {
+      print("[BLE] Sent \(jsonData.count) bytes to watch")
+    }
   }
 
   // Send simple message

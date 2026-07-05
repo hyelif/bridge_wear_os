@@ -9,6 +9,7 @@ import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
 import 'package:bridge_wear_os/widgets/device_card.dart';
 import 'package:bridge_wear_os/widgets/wear_chip.dart';
 import 'package:bridge_wear_os/widgets/animated_status.dart';
+import 'package:bridge_wear_os/widgets/round_clipper.dart';
 
 class DeviceDiscoveryScreen extends ConsumerStatefulWidget {
   const DeviceDiscoveryScreen({super.key});
@@ -210,15 +211,27 @@ class _DeviceDiscoveryScreenState
     return Scaffold(
       backgroundColor: const Color(0xFF000000),
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildStatus(),
-            _buildInstructions(),
-            if (_errorMessage != null) _buildError(),
-            Expanded(child: _buildDeviceList()),
-          ],
-        ),
+        child: context.isRound
+            ? RoundClip(
+                child: Column(
+                  children: [
+                    _buildHeader(),
+                    _buildStatus(),
+                    _buildInstructions(),
+                    if (_errorMessage != null) _buildError(),
+                    Expanded(child: _buildDeviceList()),
+                  ],
+                ),
+              )
+            : Column(
+                children: [
+                  _buildHeader(),
+                  _buildStatus(),
+                  _buildInstructions(),
+                  if (_errorMessage != null) _buildError(),
+                  Expanded(child: _buildDeviceList()),
+                ],
+              ),
       ),
     );
   }

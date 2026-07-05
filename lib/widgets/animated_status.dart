@@ -31,16 +31,19 @@ class AnimatedStatus extends StatelessWidget {
       },
       child: Row(
         key: ValueKey('$text$icon'),
-        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: context.iconSize(14), color: color),
           SizedBox(width: context.padding(6)),
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: context.fontSize(11),
-              color: color,
-              fontWeight: FontWeight.w500,
+          Flexible(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: context.fontSize(11),
+                color: color,
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],

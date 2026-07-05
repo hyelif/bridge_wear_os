@@ -11,6 +11,7 @@ import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
 import 'package:bridge_wear_os/widgets/message_bubble.dart';
 import 'package:bridge_wear_os/widgets/wear_chip.dart';
 import 'package:bridge_wear_os/widgets/connection_dot.dart';
+import 'package:bridge_wear_os/widgets/round_clipper.dart';
 
 class BridgeScreen extends ConsumerStatefulWidget {
   const BridgeScreen({super.key});
@@ -159,18 +160,33 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF000000),
       body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(),
-            _buildConnectionBar(),
-            SizedBox(height: context.padding(6)),
-            _buildActionChips(isSmall),
-            SizedBox(height: context.padding(6)),
-            _buildInputSection(isSmall),
-            SizedBox(height: context.padding(4)),
-            Expanded(child: _buildMessageList(isSmall)),
-          ],
-        ),
+        child: context.isRound
+            ? RoundClip(
+                child: Column(
+                  children: [
+                    _buildHeader(),
+                    _buildConnectionBar(),
+                    SizedBox(height: context.padding(6)),
+                    _buildActionChips(isSmall),
+                    SizedBox(height: context.padding(6)),
+                    _buildInputSection(isSmall),
+                    SizedBox(height: context.padding(4)),
+                    Expanded(child: _buildMessageList(isSmall)),
+                  ],
+                ),
+              )
+            : Column(
+                children: [
+                  _buildHeader(),
+                  _buildConnectionBar(),
+                  SizedBox(height: context.padding(6)),
+                  _buildActionChips(isSmall),
+                  SizedBox(height: context.padding(6)),
+                  _buildInputSection(isSmall),
+                  SizedBox(height: context.padding(4)),
+                  Expanded(child: _buildMessageList(isSmall)),
+                ],
+              ),
       ),
     );
   }
@@ -448,27 +464,39 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
           Icon(Icons.favorite,
               size: context.iconSize(10), color: Colors.green),
           SizedBox(width: context.padding(4)),
-          Text(
-            'Steps: ${healthService.steps}',
-            style: TextStyle(
-              fontSize: context.fontSize(9),
-              color: Colors.white70,
+          Flexible(
+            child: Text(
+              'Steps: ${healthService.steps}',
+              style: TextStyle(
+                fontSize: context.fontSize(9),
+                color: Colors.white70,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          SizedBox(width: context.padding(6)),
-          Text(
-            'HR: ${healthService.heartRate}',
-            style: TextStyle(
-              fontSize: context.fontSize(9),
-              color: Colors.white70,
+          SizedBox(width: context.padding(4)),
+          Flexible(
+            child: Text(
+              'HR: ${healthService.heartRate}',
+              style: TextStyle(
+                fontSize: context.fontSize(9),
+                color: Colors.white70,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
-          SizedBox(width: context.padding(6)),
-          Text(
-            'Cal: ${healthService.calories.toStringAsFixed(0)}',
-            style: TextStyle(
-              fontSize: context.fontSize(9),
-              color: Colors.white70,
+          SizedBox(width: context.padding(4)),
+          Flexible(
+            child: Text(
+              'Cal: ${healthService.calories.toStringAsFixed(0)}',
+              style: TextStyle(
+                fontSize: context.fontSize(9),
+                color: Colors.white70,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
