@@ -38,25 +38,34 @@ import UserNotifications
   }
 
   private func setupBluetooth() {
+    // Create BLE peripheral manager immediately — don't wait for FlutterViewController.
+    // Advertising can start independently of the Flutter channel.
+    if bridgeManager == nil {
+      bridgeManager = BridgePeripheralManager()
+      print("[BLE] BridgePeripheralManager created")
+    }
+
+    // Try to set up Flutter channel if FlutterViewController is ready.
+    // If not, the BLE manager still advertises — channel will be nil until Flutter connects.
     guard let controller = window?.rootViewController as? FlutterViewController else {
-      print("[BLE] FlutterViewController not ready yet, will retry...")
-      // Retry after a short delay
+      print("[BLE] FlutterViewController not ready yet — BLE advertising active, channel deferred")
+      // Retry after a short delay to set up the channel
       DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
         self?.setupBluetooth()
       }
       return
     }
 
-    bridgeManager = BridgePeripheralManager()
+    // Only set up channel if not already configured
+    if bridgeManager?.flutterChannel == nil {
+      let channel = FlutterMethodChannel(
+        name: "com.bridge.ble",
+        binaryMessenger: controller.binaryMessenger
+      )
 
-    let channel = FlutterMethodChannel(
-      name: "com.bridge.ble",
-      binaryMessenger: controller.binaryMessenger
-    )
+      bridgeManager?.flutterChannel = channel
 
-    bridgeManager?.flutterChannel = channel
-
-    channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
+      channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
 
       switch call.method {

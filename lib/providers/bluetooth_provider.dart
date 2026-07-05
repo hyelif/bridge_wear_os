@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_riverpod/legacy.dart';
 import 'package:bridge_wear_os/services/bluetooth_service.dart';
 import 'package:bridge_wear_os/services/health_service.dart';
 import 'package:bridge_wear_os/services/notification_service.dart';

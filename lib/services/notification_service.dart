@@ -28,7 +28,7 @@ class NotificationService extends ChangeNotifier {
     // Initialize flutter_local_notifications
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
     const initSettings = InitializationSettings(android: androidSettings);
-    await _plugin.initialize(initSettings);
+    await _plugin.initialize(settings: initSettings);
 
     // Listen for notification messages from BLE
     _messageSubscription = _bluetoothService.messageReceived.listen((data) {
@@ -88,10 +88,10 @@ class NotificationService extends ChangeNotifier {
       const details = NotificationDetails(android: androidDetails);
 
       await _plugin.show(
-        DateTime.now().millisecondsSinceEpoch ~/ 1000, // unique ID
-        title.isNotEmpty ? title : appName,
-        body,
-        details,
+        id: DateTime.now().millisecondsSinceEpoch ~/ 1000, // unique ID
+        title: title.isNotEmpty ? title : appName,
+        body: body,
+        notificationDetails: details,
         payload: bundleId, // pass bundle ID for dismiss handling
       );
     } catch (e) {

@@ -8,6 +8,7 @@ import 'package:bridge_wear_os/screens/device_discovery_screen.dart';
 import 'package:bridge_wear_os/screens/notification_settings_screen.dart';
 import 'package:bridge_wear_os/utils/responsive_utils.dart';
 import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
+import 'package:bridge_wear_os/services/health_service.dart';
 import 'package:bridge_wear_os/widgets/message_bubble.dart';
 import 'package:bridge_wear_os/widgets/wear_chip.dart';
 import 'package:bridge_wear_os/widgets/connection_dot.dart';
@@ -349,18 +350,21 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
             ],
           ),
           SizedBox(height: context.padding(4)),
-          _buildHealthStatusBar(),
+          Consumer(
+            builder: (context, ref, child) {
+              final healthService = ref.watch(healthServiceProvider);
+              return _buildHealthStatusBar(healthService);
+            },
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildHealthStatusBar() {
+  Widget _buildHealthStatusBar(HealthService healthService) {
     if (!_isHealthInitialized) {
       return const SizedBox.shrink();
     }
-
-    final healthService = ref.watch(healthServiceProvider);
 
     if (!healthService.isAvailable) {
       return Container(

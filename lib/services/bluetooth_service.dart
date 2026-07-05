@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -274,7 +275,10 @@ class BluetoothService extends ChangeNotifier {
 
         debugPrint('[BLE] Duty cycle $cycle/$scanCycles: scanning...');
 
-        // Start a short scan
+        // Start a short scan — no platform-level keyword filter.
+        // iOS in LOW_POWER mode advertises only service UUIDs (no name),
+        // so keyword filtering at the BLE stack would exclude the iPhone.
+        // Dart-side filtering with fallback handles this correctly.
         await fbp.FlutterBluePlus.startScan(
           timeout: scanDuration,
         );
@@ -364,6 +368,7 @@ class BluetoothService extends ChangeNotifier {
 
       // Attempt connection — use autoConnect for reconnection attempts
       await device.connect(
+        license: License.nonprofit,
         timeout: isAutoReconnect ? autoReconnectTimeout : connectTimeout,
         autoConnect: isAutoReconnect,
       );
@@ -522,6 +527,7 @@ class BluetoothService extends ChangeNotifier {
     try {
       // Re-discover services after reconnection
       await device.connect(
+        license: License.nonprofit,
         timeout: autoReconnectTimeout,
         autoConnect: true,
       );
