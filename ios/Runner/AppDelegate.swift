@@ -147,7 +147,8 @@ import UserNotifications
     }
 
     print("[BLE] Bridge initialized successfully")
-  }
+    } // end if bridgeManager?.flutterChannel == nil
+  } // end setupBluetooth
 
   // MARK: - UNUserNotificationCenterDelegate
 
