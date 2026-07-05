@@ -33,14 +33,40 @@ jobs:
           cd ios
           pod install
 
-      - name: Compile App Payload
+      - name: Compile App Bundle
         run: |
-          # Build unsigned IPA for SideStore
+          # Build unsigned app bundle for SideStore
           flutter build ios --release --no-codesign
+
+      - name: Verify App Bundle
+        run: |
+          APP_PATH="build/ios/Release-iphoneos/Runner.app"
+          if [ ! -d "$APP_PATH" ]; then
+            echo "ERROR: App bundle not found at $APP_PATH"
+            exit 1
+          fi
+          echo "App bundle exists at $APP_PATH"
+          echo "Contents:"
+          ls -la "$APP_PATH"
+          echo "Frameworks:"
+          ls -la "$APP_PATH/Frameworks" 2>/dev/null || echo "No Frameworks dir"
+
+      - name: Package IPA
+        run: |
           cd ios
           mkdir -p Payload
           cp -r ../build/ios/Release-iphoneos/Runner.app Payload/
           zip -r ../build/ios/Runner.ipa Payload/
+          rm -rf Payload
+
+      - name: Verify IPA
+        run: |
+          if [ ! -f "build/ios/Runner.ipa" ]; then
+            echo "ERROR: IPA not found"
+            exit 1
+          fi
+          echo "IPA size: $(ls -lh build/ios/Runner.ipa | awk '{print $5}')"
+          unzip -l build/ios/Runner.ipa | head -20
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4

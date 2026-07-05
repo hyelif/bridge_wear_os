@@ -10,20 +10,36 @@ import CoreBluetooth
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    // Initialize BLE peripheral manager
+    GeneratedPluginRegistrant.register(with: self)
+
+    // Defer BLE setup to avoid crash on iOS 13+ with SceneDelegate
+    // The window may not be ready yet during didFinishLaunching
+    DispatchQueue.main.async { [weak self] in
+      self?.setupBluetooth()
+    }
+
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  private func setupBluetooth() {
+    guard let controller = window?.rootViewController as? FlutterViewController else {
+      print("[BLE] FlutterViewController not ready yet, will retry...")
+      // Retry after a short delay
+      DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        self?.setupBluetooth()
+      }
+      return
+    }
+
     bridgeManager = BridgePeripheralManager()
 
-    // Set up Flutter MethodChannel
-    let controller = window?.rootViewController as! FlutterViewController
     let channel = FlutterMethodChannel(
       name: "com.bridge.ble",
       binaryMessenger: controller.binaryMessenger
     )
 
-    // Give the bridge manager a reference to the channel so it can send messages to Flutter
     bridgeManager?.flutterChannel = channel
 
-    // Handle method calls from Flutter
     channel.setMethodCallHandler { [weak self] (call: FlutterMethodCall, result: @escaping FlutterResult) in
       guard let self = self else { return }
 
@@ -48,8 +64,7 @@ import CoreBluetooth
       }
     }
 
-    GeneratedPluginRegistrant.register(with: self)
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    print("[BLE] Bridge initialized successfully")
   }
 }
 
