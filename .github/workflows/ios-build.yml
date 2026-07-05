@@ -31,7 +31,7 @@ jobs:
       - name: Install iOS CocoaPods Dependencies
         run: |
           cd ios
-          pod install
+          pod install --repo-update
 
       - name: Compile App Bundle
         run: |
