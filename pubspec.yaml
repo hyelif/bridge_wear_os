@@ -47,6 +47,15 @@ dependencies:
   # State management
   flutter_riverpod: ^2.6.1
 
+  # Health Connect integration
+  health_connector: ^3.9.3
+
+  # Persistent storage for auto-reconnect
+  shared_preferences: ^2.3.0
+
+  # Local notifications for Wear OS
+  flutter_local_notifications: ^18.0.0
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

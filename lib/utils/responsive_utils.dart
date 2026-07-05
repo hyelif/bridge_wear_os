@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 /// Responsive utilities for Wear OS devices
 /// Adapts UI to different screen sizes and pixel densities
-
 class ResponsiveUtils {
   /// Get screen size category
   static ScreenSize getScreenSize(BuildContext context) {
@@ -14,32 +13,34 @@ class ResponsiveUtils {
   }
 
   /// Get relative font size based on screen size
+  /// Updated multipliers for better readability on all screen sizes
   static double getFontSize(BuildContext context, double baseSize) {
     final screenSize = getScreenSize(context);
     switch (screenSize) {
       case ScreenSize.small:
-        return baseSize * 0.85;
+        return baseSize * 0.90;
       case ScreenSize.medium:
-        return baseSize * 0.92;
+        return baseSize * 0.95;
       case ScreenSize.large:
         return baseSize;
       case ScreenSize.xlarge:
-        return baseSize * 1.1;
+        return baseSize * 1.15;
     }
   }
 
   /// Get relative padding based on screen size
+  /// Updated multipliers for more comfortable touch targets
   static double getPadding(BuildContext context, double basePadding) {
     final screenSize = getScreenSize(context);
     switch (screenSize) {
       case ScreenSize.small:
-        return basePadding * 0.6;
+        return basePadding * 0.7;
       case ScreenSize.medium:
-        return basePadding * 0.8;
+        return basePadding * 0.85;
       case ScreenSize.large:
         return basePadding;
       case ScreenSize.xlarge:
-        return basePadding * 1.2;
+        return basePadding * 1.25;
     }
   }
 
@@ -48,13 +49,13 @@ class ResponsiveUtils {
     final screenSize = getScreenSize(context);
     switch (screenSize) {
       case ScreenSize.small:
-        return baseIconSize * 0.75;
+        return baseIconSize * 0.80;
       case ScreenSize.medium:
-        return baseIconSize * 0.85;
+        return baseIconSize * 0.90;
       case ScreenSize.large:
         return baseIconSize;
       case ScreenSize.xlarge:
-        return baseIconSize * 1.15;
+        return baseIconSize * 1.20;
     }
   }
 
@@ -63,22 +64,58 @@ class ResponsiveUtils {
     final screenSize = getScreenSize(context);
     switch (screenSize) {
       case ScreenSize.small:
-        return baseHeight * 0.8;
+        return baseHeight * 0.85;
       case ScreenSize.medium:
-        return baseHeight * 0.9;
+        return baseHeight * 0.95;
       case ScreenSize.large:
         return baseHeight;
       case ScreenSize.xlarge:
-        return baseHeight * 1.1;
+        return baseHeight * 1.15;
     }
   }
 
-  /// Check if device is a round watch
+  /// Detect round screens by checking if left/right safe area padding differs.
+  /// Round watches typically report asymmetric horizontal safe area insets
+  /// due to the curved display edges, while square/rectangular screens
+  /// report symmetric (or zero) horizontal padding.
   static bool isRoundWatch(BuildContext context) {
     final padding = MediaQuery.of(context).padding;
-    // If horizontal padding is significantly different from vertical,
-    // it's likely a round watch
-    return (padding.left - padding.right).abs() < 10;
+    // If left and right padding differ by more than 1 pixel, it's a round screen
+    return (padding.left - padding.right).abs() > 1.0;
+  }
+
+  /// Internal ambient mode state.
+  /// Set via [setAmbientMode] from a widget that observes ambient changes
+  /// (e.g., using the `wear` package's [AmbientMode] widget or a platform
+  /// channel listener).
+  static bool _ambientMode = false;
+
+  /// Update the ambient mode state.
+  /// Call this from a [StatefulWidget] that listens to ambient mode changes.
+  static void setAmbientMode(bool value) {
+    _ambientMode = value;
+  }
+
+  /// Return true if the device is in ambient / always-on display mode.
+  /// The caller must have previously set the state via [setAmbientMode].
+  static bool ambientMode() {
+    return _ambientMode;
+  }
+
+  /// Convert Bluetooth RSSI value (dBm) to a signal strength of 1-5 bars.
+  ///
+  /// RSSI range: -30 (strongest) to -100 (weakest).
+  ///   >= -50  -> 5 bars (excellent)
+  ///   >= -60  -> 4 bars (good)
+  ///   >= -70  -> 3 bars (fair)
+  ///   >= -85  -> 2 bars (weak)
+  ///   <  -85  -> 1 bar  (very weak)
+  static int getSignalBars(int rssi) {
+    if (rssi >= -50) return 5;
+    if (rssi >= -60) return 4;
+    if (rssi >= -70) return 3;
+    if (rssi >= -85) return 2;
+    return 1;
   }
 
   /// Get safe area padding for round watches

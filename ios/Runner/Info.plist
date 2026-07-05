@@ -67,6 +67,8 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<!-- Bluetooth Permissions -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Bridge app needs Bluetooth access to communicate with your Wear OS watch</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Bridge app needs Bluetooth access to connect with your iOS device and Wear OS watch</string>
 	<key>NSBluetoothCentralUsageDescription</key>

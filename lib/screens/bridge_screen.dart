@@ -1,14 +1,16 @@
-// Main Bridge Screen - communicate with connected device.
-// Responsive design for different Wear OS screen sizes.
+// Main Bridge Screen - modern Wear OS UI
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:bridge_wear_os/models/bridge_message.dart';
 import 'package:bridge_wear_os/services/bridge_manager.dart';
 import 'package:bridge_wear_os/screens/device_discovery_screen.dart';
+import 'package:bridge_wear_os/screens/notification_settings_screen.dart';
 import 'package:bridge_wear_os/utils/responsive_utils.dart';
 import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
+import 'package:bridge_wear_os/widgets/message_bubble.dart';
+import 'package:bridge_wear_os/widgets/wear_chip.dart';
+import 'package:bridge_wear_os/widgets/connection_dot.dart';
 
 class BridgeScreen extends ConsumerStatefulWidget {
   const BridgeScreen({super.key});
@@ -23,23 +25,25 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
   final TextEditingController _titleController = TextEditingController();
   final List<BridgeMessage> _messages = [];
   StreamSubscription<BridgeMessage>? _messageSubscription;
+  bool _isInputExpanded = false;
+  bool _isHealthInitialized = false;
+  bool _isSyncingHealth = false;
 
   @override
   void initState() {
     super.initState();
     _initializeBridge();
+    _initializeHealth();
   }
 
   void _initializeBridge() {
     final bluetoothService = ref.read(bluetoothServiceProvider);
     _bridgeManager = BridgeManager(bluetoothService);
 
-    // Listen to incoming messages
     _messageSubscription = _bridgeManager.messages.listen((message) {
       if (!mounted) return;
       setState(() {
         _messages.add(message);
-        // Keep only last 20 messages to save space
         if (_messages.length > 20) {
           _messages.removeAt(0);
         }
@@ -47,9 +51,23 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
     });
   }
 
+  Future<void> _initializeHealth() async {
+    final healthService = ref.read(healthServiceProvider);
+    await healthService.initialize();
+    if (healthService.isAvailable) {
+      final granted = await healthService.requestPermissions();
+      if (granted) {
+        await healthService.fetchAllData();
+      }
+    }
+    if (mounted) {
+      setState(() => _isHealthInitialized = true);
+    }
+  }
+
   Future<void> _sendNotification() async {
     if (_titleController.text.isEmpty || _messageController.text.isEmpty) {
-      _showSnackBar('Please fill in all fields');
+      _showSnackBar('Fill in all fields');
       return;
     }
 
@@ -64,19 +82,17 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
     if (success) {
       _titleController.clear();
       _messageController.clear();
-      _showSnackBar('Notification sent!');
+      setState(() => _isInputExpanded = false);
+      _showSnackBar('Sent!');
     } else {
-      _showSnackBar('Failed to send notification');
+      _showSnackBar('Failed to send');
     }
   }
 
   void _showSnackBar(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          message,
-          style: TextStyle(fontSize: context.fontSize(11)),
-        ),
+        content: Text(message, style: TextStyle(fontSize: context.fontSize(11))),
         duration: const Duration(seconds: 2),
       ),
     );
@@ -85,38 +101,52 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
   Future<void> _sendPing() async {
     bool success = await _bridgeManager.sendPing();
     if (!mounted) return;
-    if (success) {
-      _showSnackBar('Ping sent!');
-    } else {
-      _showSnackBar('Failed to send ping');
-    }
+    _showSnackBar(success ? 'Ping sent!' : 'Failed');
   }
 
-  Future<void> _sendHealthData() async {
-    bool success = await _bridgeManager.sendHealthData(
-      steps: 5000,
-      heartRate: 72,
-      calories: 250,
-      sleepData: {'duration': 7.5, 'quality': 'good'},
-    );
+  Future<void> _syncAndSendHealthData() async {
+    final healthService = ref.read(healthServiceProvider);
+
+    if (!healthService.isAvailable) {
+      _showSnackBar('Health Connect not available');
+      return;
+    }
+
+    if (!healthService.hasPermissions) {
+      final granted = await healthService.requestPermissions();
+      if (!granted) {
+        _showSnackBar('Health permissions not granted');
+        return;
+      }
+    }
+
+    setState(() => _isSyncingHealth = true);
+
+    await healthService.fetchAllData();
 
     if (!mounted) return;
 
-    if (success) {
-      _showSnackBar('Health data sent!');
-    } else {
-      _showSnackBar('Failed to send health data');
-    }
+    final data = healthService.getHealthDataMap();
+    bool success = await _bridgeManager.sendHealthData(
+      steps: data['steps'] as int,
+      heartRate: data['heartRate'] as int,
+      calories: data['calories'] as double,
+      sleepData: data['sleepData'] as Map<String, dynamic>,
+    );
+
+    setState(() => _isSyncingHealth = false);
+
+    if (!mounted) return;
+    _showSnackBar(success ? 'Health data sent!' : 'Failed to send');
   }
 
   Future<void> _disconnect() async {
     final bluetoothService = ref.read(bluetoothServiceProvider);
     _bridgeManager.dispose();
     await bluetoothService.disconnect();
-
     if (mounted) {
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (context) => const DeviceDiscoveryScreen()),
+        MaterialPageRoute(builder: (_) => const DeviceDiscoveryScreen()),
       );
     }
   }
@@ -125,49 +155,20 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
   Widget build(BuildContext context) {
     final screenWidth = context.screenWidth;
     final isSmall = screenWidth < 200;
-    final isMedium = screenWidth < 280;
 
     return Scaffold(
+      backgroundColor: const Color(0xFF000000),
       body: SafeArea(
         child: Column(
           children: [
-            // Header
             _buildHeader(),
-
-            // Connection Status
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: context.padding(10),
-              ),
-              child: _buildConnectionStatus(),
-            ),
-
+            _buildConnectionBar(),
             SizedBox(height: context.padding(6)),
-
-            // Quick Actions
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: context.padding(10),
-              ),
-              child: _buildQuickActions(isSmall),
-            ),
-
+            _buildActionChips(isSmall),
             SizedBox(height: context.padding(6)),
-
-            // Input Section
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: context.padding(10),
-              ),
-              child: _buildInputSection(isSmall, isMedium),
-            ),
-
+            _buildInputSection(isSmall),
             SizedBox(height: context.padding(4)),
-
-            // Message History
-            Expanded(
-              child: _buildMessageHistory(isSmall),
-            ),
+            Expanded(child: _buildMessageList(isSmall)),
           ],
         ),
       ),
@@ -182,11 +183,8 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.connected_tv,
-            size: context.iconSize(18),
-            color: Colors.green,
-          ),
+          Icon(Icons.connected_tv,
+              size: context.iconSize(18), color: Colors.green),
           SizedBox(width: context.padding(6)),
           Expanded(
             child: Text(
@@ -198,10 +196,7 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
             ),
           ),
           IconButton(
-            icon: Icon(
-              Icons.close,
-              size: context.iconSize(16),
-            ),
+            icon: Icon(Icons.close, size: context.iconSize(16)),
             onPressed: _disconnect,
             tooltip: 'Disconnect',
             padding: EdgeInsets.zero,
@@ -215,61 +210,64 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
     );
   }
 
-  Widget _buildConnectionStatus() {
+  Widget _buildConnectionBar() {
     return Consumer(
       builder: (context, ref, child) {
-        final bluetoothService = ref.watch(bluetoothServiceProvider);
+        final service = ref.watch(bluetoothServiceProvider);
         return StreamBuilder<bool>(
-          stream: bluetoothService.connectionState,
+          stream: service.connectionState,
           builder: (context, snapshot) {
             final isConnected = snapshot.data ?? false;
-            final deviceName = bluetoothService.connectedDevice?.platformName ?? 'Unknown';
+            final deviceName =
+                service.connectedDevice?.platformName ?? 'Unknown';
 
-            return Container(
-              padding: EdgeInsets.all(context.padding(8)),
-              decoration: BoxDecoration(
-                color: isConnected
-                    ? Colors.green.withValues(alpha: 0.15)
-                    : Colors.red.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(context.padding(6)),
-                border: Border.all(
-                  color: isConnected ? Colors.green : Colors.red,
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    isConnected ? Icons.check_circle : Icons.error_outline,
-                    size: context.iconSize(14),
+            return Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.padding(10)),
+              child: Container(
+                padding: EdgeInsets.all(context.padding(8)),
+                decoration: BoxDecoration(
+                  color: isConnected
+                      ? Colors.green.withValues(alpha: 0.15)
+                      : Colors.red.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(context.padding(6)),
+                  border: Border.all(
                     color: isConnected ? Colors.green : Colors.red,
+                    width: 1,
                   ),
-                  SizedBox(width: context.padding(6)),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          isConnected ? 'Connected' : 'Disconnected',
-                          style: TextStyle(
-                            fontSize: context.fontSize(10),
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        if (isConnected)
-                          Text(
-                            deviceName,
-                            style: TextStyle(
-                              fontSize: context.fontSize(9),
-                              color: Colors.white70,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                      ],
+                ),
+                child: Row(
+                  children: [
+                    ConnectionDot(
+                      isConnected: isConnected,
+                      size: context.iconSize(8),
                     ),
-                  ),
-                ],
+                    SizedBox(width: context.padding(6)),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            isConnected ? 'Connected' : 'Disconnected',
+                            style: TextStyle(
+                              fontSize: context.fontSize(10),
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          if (isConnected)
+                            Text(
+                              deviceName,
+                              style: TextStyle(
+                                fontSize: context.fontSize(9),
+                                color: Colors.white70,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           },
@@ -278,112 +276,293 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
     );
   }
 
-  Widget _buildQuickActions(bool isSmall) {
-    return Row(
-      children: [
-        Expanded(
-          child: _QuickActionButton(
-            icon: Icons.speed,
-            label: 'Ping',
-            onPressed: _sendPing,
-            isSmall: isSmall,
-            context: context,
+  Widget _buildActionChips(bool isSmall) {
+    return Padding(
+      padding: EdgeInsets.symmetric(horizontal: context.padding(10)),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: WearChip(
+                  icon: Icons.speed,
+                  label: 'Ping',
+                  onPressed: _sendPing,
+                  color: Colors.blue,
+                ),
+              ),
+              SizedBox(width: context.padding(6)),
+              Expanded(
+                child: WearChip(
+                  icon: Icons.favorite,
+                  label: 'Health',
+                  onPressed: _syncAndSendHealthData,
+                  color: Colors.pink,
+                ),
+              ),
+              SizedBox(width: context.padding(6)),
+              Expanded(
+                child: WearChip(
+                  icon: Icons.send,
+                  label: 'Send',
+                  onPressed: () =>
+                      setState(() => _isInputExpanded = !_isInputExpanded),
+                  color: Colors.amber,
+                ),
+              ),
+            ],
           ),
-        ),
-        SizedBox(width: context.padding(6)),
-        Expanded(
-          child: _QuickActionButton(
-            icon: Icons.favorite,
-            label: 'Health',
-            onPressed: _sendHealthData,
-            isSmall: isSmall,
-            context: context,
+          SizedBox(height: context.padding(4)),
+          Row(
+            children: [
+              Expanded(
+                child: WearChip(
+                  icon: Icons.notifications,
+                  label: 'Notif',
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const NotificationSettingsScreen()),
+                    );
+                  },
+                  color: Colors.purple,
+                ),
+              ),
+              SizedBox(width: context.padding(6)),
+              // Spacer to keep Notif chip left-aligned
+              const Spacer(),
+            ],
           ),
-        ),
-      ],
+          SizedBox(height: context.padding(4)),
+          _buildHealthStatusBar(),
+        ],
+      ),
     );
   }
 
-  Widget _buildInputSection(bool isSmall, bool isMedium) {
-    return Card(
-      child: Padding(
-        padding: EdgeInsets.all(context.padding(8)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _buildHealthStatusBar() {
+    if (!_isHealthInitialized) {
+      return const SizedBox.shrink();
+    }
+
+    final healthService = ref.watch(healthServiceProvider);
+
+    if (!healthService.isAvailable) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: context.padding(8),
+          vertical: context.padding(4),
+        ),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(context.padding(6)),
+          border: Border.all(color: Colors.orange, width: 0.5),
+        ),
+        child: Row(
           children: [
-            Text(
-              'Send to iPhone',
-              style: TextStyle(
-                fontSize: context.fontSize(10),
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            SizedBox(height: context.padding(6)),
-            TextField(
-              controller: _titleController,
-              style: TextStyle(fontSize: context.fontSize(11)),
-              decoration: InputDecoration(
-                hintText: 'Title',
-                hintStyle: TextStyle(fontSize: context.fontSize(10)),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: context.padding(8),
-                  vertical: context.padding(6),
-                ),
-                isDense: true,
-              ),
-            ),
-            SizedBox(height: context.padding(4)),
-            TextField(
-              controller: _messageController,
-              style: TextStyle(fontSize: context.fontSize(11)),
-              maxLines: isSmall ? 1 : 2,
-              decoration: InputDecoration(
-                hintText: 'Message',
-                hintStyle: TextStyle(fontSize: context.fontSize(10)),
-                contentPadding: EdgeInsets.symmetric(
-                  horizontal: context.padding(8),
-                  vertical: context.padding(6),
-                ),
-                isDense: true,
-              ),
-            ),
-            SizedBox(height: context.padding(6)),
-            SizedBox(
-              width: double.infinity,
-              height: context.buttonHeight(32),
-              child: ElevatedButton.icon(
-                onPressed: _sendNotification,
-                icon: Icon(Icons.send, size: context.iconSize(14)),
-                label: Text(
-                  'Send',
-                  style: TextStyle(fontSize: context.fontSize(11)),
-                ),
-                style: ElevatedButton.styleFrom(
-                  padding: EdgeInsets.symmetric(vertical: context.padding(4)),
+            Icon(Icons.info_outline,
+                size: context.iconSize(10), color: Colors.orange),
+            SizedBox(width: context.padding(4)),
+            Expanded(
+              child: Text(
+                'Health Connect not available',
+                style: TextStyle(
+                  fontSize: context.fontSize(9),
+                  color: Colors.orange,
                 ),
               ),
             ),
           ],
         ),
+      );
+    }
+
+    if (_isSyncingHealth) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: context.padding(8),
+          vertical: context.padding(4),
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: context.iconSize(10),
+              height: context.iconSize(10),
+              child: const CircularProgressIndicator(strokeWidth: 1.5),
+            ),
+            SizedBox(width: context.padding(4)),
+            Text(
+              'Syncing health data...',
+              style: TextStyle(
+                fontSize: context.fontSize(9),
+                color: Colors.white70,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (!healthService.hasPermissions) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: context.padding(8),
+          vertical: context.padding(4),
+        ),
+        decoration: BoxDecoration(
+          color: Colors.orange.withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(context.padding(6)),
+          border: Border.all(color: Colors.orange, width: 0.5),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.shield_outlined,
+                size: context.iconSize(10), color: Colors.orange),
+            SizedBox(width: context.padding(4)),
+            Expanded(
+              child: Text(
+                'Health permissions needed',
+                style: TextStyle(
+                  fontSize: context.fontSize(9),
+                  color: Colors.orange,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Show current health data summary
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: context.padding(8),
+        vertical: context.padding(4),
+      ),
+      decoration: BoxDecoration(
+        color: Colors.green.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(context.padding(6)),
+        border: Border.all(color: Colors.green, width: 0.5),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.favorite,
+              size: context.iconSize(10), color: Colors.green),
+          SizedBox(width: context.padding(4)),
+          Text(
+            'Steps: ${healthService.steps}',
+            style: TextStyle(
+              fontSize: context.fontSize(9),
+              color: Colors.white70,
+            ),
+          ),
+          SizedBox(width: context.padding(6)),
+          Text(
+            'HR: ${healthService.heartRate}',
+            style: TextStyle(
+              fontSize: context.fontSize(9),
+              color: Colors.white70,
+            ),
+          ),
+          SizedBox(width: context.padding(6)),
+          Text(
+            'Cal: ${healthService.calories.toStringAsFixed(0)}',
+            style: TextStyle(
+              fontSize: context.fontSize(9),
+              color: Colors.white70,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildMessageHistory(bool isSmall) {
+  Widget _buildInputSection(bool isSmall) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      height: _isInputExpanded ? (isSmall ? 100 : 120) : 0,
+      child: _isInputExpanded
+          ? Padding(
+              padding: EdgeInsets.symmetric(horizontal: context.padding(10)),
+              child: Card(
+                color: Colors.white.withValues(alpha: 0.05),
+                child: Padding(
+                  padding: EdgeInsets.all(context.padding(8)),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: _titleController,
+                        style: TextStyle(fontSize: context.fontSize(11)),
+                        decoration: InputDecoration(
+                          hintText: 'Title',
+                          hintStyle: TextStyle(fontSize: context.fontSize(10)),
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: context.padding(8),
+                            vertical: context.padding(4),
+                          ),
+                          isDense: true,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: context.padding(4)),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _messageController,
+                              style: TextStyle(fontSize: context.fontSize(11)),
+                              decoration: InputDecoration(
+                                hintText: 'Message',
+                                hintStyle:
+                                    TextStyle(fontSize: context.fontSize(10)),
+                                contentPadding: EdgeInsets.symmetric(
+                                  horizontal: context.padding(8),
+                                  vertical: context.padding(4),
+                                ),
+                                isDense: true,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: context.padding(4)),
+                          SizedBox(
+                            height: context.buttonHeight(32),
+                            child: ElevatedButton(
+                              onPressed: _sendNotification,
+                              style: ElevatedButton.styleFrom(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: context.padding(8),
+                                ),
+                              ),
+                              child: Icon(Icons.send,
+                                  size: context.iconSize(14)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            )
+          : const SizedBox.shrink(),
+    );
+  }
+
+  Widget _buildMessageList(bool isSmall) {
     return Padding(
-      padding: EdgeInsets.symmetric(
-        horizontal: context.padding(10),
-      ),
+      padding: EdgeInsets.symmetric(horizontal: context.padding(10)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Icon(
-                Icons.message,
-                size: context.iconSize(12),
-                color: Colors.white70,
-              ),
+              Icon(Icons.message,
+                  size: context.iconSize(12), color: Colors.white70),
               SizedBox(width: context.padding(4)),
               Text(
                 'Messages (${_messages.length})',
@@ -399,20 +578,34 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
           Expanded(
             child: _messages.isEmpty
                 ? Center(
-                    child: Text(
-                      'No messages yet',
-                      style: TextStyle(
-                        fontSize: context.fontSize(11),
-                        color: Colors.white38,
-                      ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.chat_bubble_outline,
+                            size: context.iconSize(24), color: Colors.white24),
+                        SizedBox(height: context.padding(8)),
+                        Text(
+                          'No messages yet',
+                          style: TextStyle(
+                            fontSize: context.fontSize(11),
+                            color: Colors.white38,
+                          ),
+                        ),
+                      ],
                     ),
                   )
                 : ListView.builder(
                     reverse: true,
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
-                      final message = _messages[_messages.length - 1 - index];
-                      return _MessageCard(message: message, isSmall: isSmall, context: context);
+                      final message =
+                          _messages[_messages.length - 1 - index];
+                      return MessageBubble(
+                        message: message,
+                        isOutgoing: message.type == MessageType.notification ||
+                            message.type == MessageType.health ||
+                            message.type == MessageType.ping,
+                      );
                     },
                   ),
           ),
@@ -428,109 +621,5 @@ class _BridgeScreenState extends ConsumerState<BridgeScreen> {
     _messageSubscription?.cancel();
     _bridgeManager.dispose();
     super.dispose();
-  }
-}
-
-class _QuickActionButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onPressed;
-  final bool isSmall;
-  final BuildContext context;
-
-  const _QuickActionButton({
-    required this.icon,
-    required this.label,
-    required this.onPressed,
-    required this.isSmall,
-    required this.context,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: context.iconSize(14)),
-      label: Text(
-        label,
-        style: TextStyle(fontSize: context.fontSize(isSmall ? 10 : 11)),
-      ),
-      style: OutlinedButton.styleFrom(
-        padding: EdgeInsets.symmetric(
-          vertical: context.padding(4),
-        ),
-      ),
-    );
-  }
-}
-
-class _MessageCard extends StatelessWidget {
-  final BridgeMessage message;
-  final bool isSmall;
-  final BuildContext context;
-
-  const _MessageCard({
-    required this.message,
-    required this.isSmall,
-    required this.context,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      margin: EdgeInsets.symmetric(vertical: context.padding(2)),
-      child: Padding(
-        padding: EdgeInsets.all(context.padding(6)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: context.padding(4),
-                    vertical: context.padding(1),
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.blue.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(context.padding(2)),
-                  ),
-                  child: Text(
-                    message.type.toString().split('.').last,
-                    style: TextStyle(
-                      fontSize: context.fontSize(8),
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                Text(
-                  '${message.timestamp.hour}:${message.timestamp.minute.toString().padLeft(2, '0')}',
-                  style: TextStyle(
-                    fontSize: context.fontSize(8),
-                    color: Colors.white54,
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: context.padding(2)),
-            Text(
-              _getMessagePreview(),
-              style: TextStyle(fontSize: context.fontSize(9)),
-              maxLines: isSmall ? 1 : 2,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _getMessagePreview() {
-    final payload = message.payload;
-    if (payload.containsKey('title') && payload.containsKey('body')) {
-      return '${payload['title']}: ${payload['body']}';
-    }
-    return payload.toString();
   }
 }

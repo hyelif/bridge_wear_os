@@ -1,5 +1,4 @@
-// Device Discovery Screen - Shows all discovered BLE devices with RSSI,
-// toggleable filtering, detailed connection status, and auto-rescan.
+// Device Discovery Screen - modern Wear OS UI
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' as fbp;
@@ -7,15 +6,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:bridge_wear_os/screens/bridge_screen.dart';
 import 'package:bridge_wear_os/utils/responsive_utils.dart';
 import 'package:bridge_wear_os/providers/bluetooth_provider.dart';
+import 'package:bridge_wear_os/widgets/device_card.dart';
+import 'package:bridge_wear_os/widgets/wear_chip.dart';
+import 'package:bridge_wear_os/widgets/animated_status.dart';
 
 class DeviceDiscoveryScreen extends ConsumerStatefulWidget {
   const DeviceDiscoveryScreen({super.key});
 
   @override
-  ConsumerState<DeviceDiscoveryScreen> createState() => _DeviceDiscoveryScreenState();
+  ConsumerState<DeviceDiscoveryScreen> createState() =>
+      _DeviceDiscoveryScreenState();
 }
 
-class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
+class _DeviceDiscoveryScreenState
+    extends ConsumerState<DeviceDiscoveryScreen> {
   List<fbp.BluetoothDevice> _discoveredDevices = [];
   final Map<String, int> _deviceRssi = {};
   bool _isConnecting = false;
@@ -44,9 +48,54 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
         _bluetoothOn = state == fbp.BluetoothAdapterState.on;
       });
       if (_bluetoothOn) {
-        _startScanning();
+        _checkAutoReconnect();
       }
     });
+  }
+
+  /// Check if there's a saved device to auto-connect to.
+  /// If so, show "Auto-connecting..." and attempt connection.
+  /// If not, start scanning immediately.
+  void _checkAutoReconnect() {
+    final service = ref.read(bluetoothServiceProvider);
+    if (service.savedDeviceId != null && service.isAutoReconnecting) {
+      setState(() {
+        _connectionStatus = 'Auto-connecting...';
+        _isConnecting = true;
+      });
+
+      // Listen for connection state changes to know when auto-connect completes
+      _discoverySubscription?.cancel();
+      _discoverySubscription = service.connectionState.listen((connected) {
+        if (!mounted) return;
+        if (connected) {
+          setState(() => _connectionStatus = 'Connected!');
+          service.stopScan();
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (!mounted) return;
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(builder: (_) => const BridgeScreen()),
+            );
+          });
+        }
+      });
+
+      // Also listen for auto-reconnect state changes
+      ref.listen(autoReconnectProvider, (prev, next) {
+        if (!mounted) return;
+        if (!next.isAutoReconnecting && !service.isConnected) {
+          // Auto-reconnect failed — fall back to normal scan
+          setState(() {
+            _isConnecting = false;
+            _connectionStatus = null;
+            _errorMessage = 'Could not auto-connect. Scanning for devices...';
+          });
+          _startScanning();
+        }
+      });
+    } else {
+      _startScanning();
+    }
   }
 
   void _startScanning() {
@@ -64,8 +113,7 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
       _connectionStatus = null;
     });
 
-    // Listen to raw scan results for RSSI data (broadcast stream, safe to
-    // subscribe alongside the service's own listener).
+    // Listen to raw scan results for RSSI data
     _scanResultsSubscription?.cancel();
     _scanResultsSubscription =
         fbp.FlutterBluePlus.scanResults.listen((results) {
@@ -83,12 +131,10 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
     _discoverySubscription = service.discoveredDevices.listen((devices) {
       if (!mounted) return;
       setState(() => _discoveredDevices = devices);
-      // Devices found -- cancel any pending auto-rescan and reset the counter.
       _cancelAutoRescan();
       _autoRescanCount = 0;
     });
 
-    // Schedule auto-rescan if no devices appear within 10 seconds.
     _startAutoRescanTimer();
   }
 
@@ -144,7 +190,6 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
     if (connected) {
       setState(() => _connectionStatus = 'Connected!');
       await service.stopScan();
-      // Brief pause so the user sees "Connected!" before navigating.
       await Future.delayed(const Duration(milliseconds: 500));
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -163,6 +208,7 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF000000),
       body: SafeArea(
         child: Column(
           children: [
@@ -176,10 +222,6 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
       ),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Header
-  // ---------------------------------------------------------------------------
 
   Widget _buildHeader() {
     return Padding(
@@ -196,7 +238,6 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
             ),
           ),
           const Spacer(),
-          // Toggle: show all devices vs. filtered only
           IconButton(
             icon: Icon(
               _showAllDevices ? Icons.filter_list_off : Icons.filter_list,
@@ -217,17 +258,16 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Bluetooth / connection status bar
-  // ---------------------------------------------------------------------------
-
   Widget _buildStatus() {
+    final isAutoConnecting = _connectionStatus == 'Auto-connecting...';
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: context.padding(12)),
       child: Container(
         padding: EdgeInsets.all(context.padding(10)),
         decoration: BoxDecoration(
-          color: _bluetoothOn ? Colors.green[900] : Colors.red[900],
+          color: _bluetoothOn
+              ? (isAutoConnecting ? Colors.blue[900] : Colors.green[900])
+              : Colors.red[900],
           borderRadius: BorderRadius.circular(context.padding(8)),
         ),
         child: Row(
@@ -239,16 +279,41 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
             ),
             SizedBox(width: context.padding(8)),
             Expanded(
-              child: Text(
-                _buildStatusText(),
-                style: TextStyle(fontSize: context.fontSize(11)),
+              child: AnimatedStatus(
+                text: _bluetoothOn
+                    ? (_isConnecting
+                        ? _connectionStatus ?? 'Scanning...'
+                        : 'Scanning for devices...')
+                    : 'Bluetooth OFF',
+                icon: _bluetoothOn
+                    ? (isAutoConnecting
+                        ? Icons.sync
+                        : (_isConnecting
+                            ? Icons.sync
+                            : Icons.bluetooth_searching))
+                    : Icons.bluetooth_disabled,
+                color: _bluetoothOn
+                    ? (isAutoConnecting ? Colors.blue : Colors.green)
+                    : Colors.red,
               ),
             ),
+            if (_bluetoothOn && !_isConnecting)
+              SizedBox(
+                width: context.iconSize(14),
+                height: context.iconSize(14),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: Colors.green,
+                ),
+              ),
             if (_isConnecting)
               SizedBox(
                 width: context.iconSize(14),
                 height: context.iconSize(14),
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: isAutoConnecting ? Colors.blue : Colors.blue,
+                ),
               ),
           ],
         ),
@@ -256,20 +321,9 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
     );
   }
 
-  String _buildStatusText() {
-    if (!_bluetoothOn) return 'Bluetooth OFF';
-    if (_isConnecting) return _connectionStatus ?? 'Connecting...';
-    if (_discoveredDevices.isEmpty) {
-      return _showAllDevices ? 'Scanning for devices...' : 'Scanning for iPhone...';
-    }
-    return '${_discoveredDevices.length} device${_discoveredDevices.length == 1 ? '' : 's'} found';
-  }
-
-  // ---------------------------------------------------------------------------
-  // Instructions
-  // ---------------------------------------------------------------------------
-
   Widget _buildInstructions() {
+    final isAutoConnecting = _connectionStatus == 'Auto-connecting...';
+    if (isAutoConnecting) return const SizedBox.shrink();
     return Padding(
       padding: EdgeInsets.all(context.padding(12)),
       child: Container(
@@ -279,19 +333,13 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
           borderRadius: BorderRadius.circular(context.padding(6)),
         ),
         child: Text(
-          _showAllDevices
-              ? 'Select any nearby device to connect'
-              : 'On iPhone: Open Bridge app and keep it open',
+          'On iPhone: Open Bridge app and keep it open',
           style: TextStyle(fontSize: context.fontSize(10)),
           textAlign: TextAlign.center,
         ),
       ),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Error message
-  // ---------------------------------------------------------------------------
 
   Widget _buildError() {
     return Padding(
@@ -321,57 +369,9 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // RSSI signal-strength indicator (5-bar style)
-  // ---------------------------------------------------------------------------
-
-  Widget _buildRssiIndicator(int rssi) {
-    // Map RSSI (dBm) to 0-5 bars.
-    //   >= -50  -> 5 bars (excellent)
-    //   >= -60  -> 4 bars (good)
-    //   >= -70  -> 3 bars (fair)
-    //   >= -80  -> 2 bars (weak)
-    //   >= -90  -> 1 bar  (very weak)
-    //   <  -90  -> 0 bars (no signal)
-    int bars;
-    if (rssi >= -50) {
-      bars = 5;
-    } else if (rssi >= -60) {
-      bars = 4;
-    } else if (rssi >= -70) {
-      bars = 3;
-    } else if (rssi >= -80) {
-      bars = 2;
-    } else if (rssi >= -90) {
-      bars = 1;
-    } else {
-      bars = 0;
-    }
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: List.generate(5, (index) {
-        final filled = index < bars;
-        return Container(
-          width: 3,
-          height: 4.0 + (index * 3.0),
-          margin: const EdgeInsets.only(right: 1.5),
-          decoration: BoxDecoration(
-            color: filled
-                ? (bars <= 2 ? Colors.orange : Colors.green)
-                : Colors.grey[700],
-            borderRadius: BorderRadius.circular(1),
-          ),
-        );
-      }),
-    );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Device list
-  // ---------------------------------------------------------------------------
-
   Widget _buildDeviceList() {
+    final isAutoConnecting = _connectionStatus == 'Auto-connecting...';
+
     if (_discoveredDevices.isEmpty) {
       return Center(
         child: Column(
@@ -385,31 +385,41 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
               ),
               SizedBox(height: context.padding(12)),
               Text(
-                _connectionStatus ??
-                    'Connecting to ${_selectedDevice?.platformName}...',
+                isAutoConnecting
+                    ? 'Auto-connecting to saved device...'
+                    : 'Connecting to ${_selectedDevice?.platformName}...',
                 style: TextStyle(fontSize: context.fontSize(12)),
-                textAlign: TextAlign.center,
               ),
+              if (isAutoConnecting) ...[
+                SizedBox(height: context.padding(8)),
+                Text(
+                  'Make sure the iPhone is nearby with Bridge open',
+                  style: TextStyle(
+                    fontSize: context.fontSize(9),
+                    color: Colors.white54,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
             ] else ...[
               Icon(
-                Icons.search,
+                Icons.bluetooth_searching,
                 size: context.iconSize(32),
                 color: Colors.white38,
               ),
               SizedBox(height: context.padding(8)),
               Text(
-                _showAllDevices
-                    ? 'Searching for devices...'
-                    : 'Searching for iPhone...',
+                'Searching for iPhone...',
                 style: TextStyle(
                   fontSize: context.fontSize(12),
                   color: Colors.white70,
                 ),
               ),
               SizedBox(height: context.padding(16)),
-              OutlinedButton(
+              WearChip(
+                icon: Icons.refresh,
+                label: 'Scan',
                 onPressed: _startScanning,
-                child: const Text('Scan'),
               ),
             ],
           ],
@@ -417,61 +427,35 @@ class _DeviceDiscoveryScreenState extends ConsumerState<DeviceDiscoveryScreen> {
       );
     }
 
-    return ListView.builder(
-      padding: EdgeInsets.all(context.padding(8)),
-      itemCount: _discoveredDevices.length,
-      itemBuilder: (context, index) {
-        final device = _discoveredDevices[index];
-        final name =
-            device.platformName.isNotEmpty ? device.platformName : 'Unknown';
-        final rssi = _deviceRssi[device.remoteId.str] ?? -100;
-
-        return Card(
-          child: ListTile(
-            leading: Icon(
-              _showAllDevices ? Icons.devices : Icons.phone_iphone,
-              size: context.iconSize(20),
-              color: Colors.green,
-            ),
-            title: Text(name, style: TextStyle(fontSize: context.fontSize(13))),
-            subtitle: Row(
-              children: [
-                Flexible(
-                  child: Text(
-                    device.remoteId.str,
-                    style: TextStyle(fontSize: context.fontSize(9)),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                const Spacer(),
-                _buildRssiIndicator(rssi),
-                SizedBox(width: context.padding(4)),
-                Text(
-                  '$rssi dBm',
-                  style: TextStyle(
-                    fontSize: context.fontSize(8),
-                    color: Colors.white54,
-                  ),
-                ),
-              ],
-            ),
-            trailing: _isConnecting && _selectedDevice == device
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.chevron_right),
-            onTap: _isConnecting ? null : () => _connectToDevice(device),
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: EdgeInsets.all(context.padding(8)),
+            itemCount: _discoveredDevices.length,
+            itemBuilder: (context, index) {
+              final device = _discoveredDevices[index];
+              return DeviceCard(
+                device: device,
+                rssi: _deviceRssi[device.remoteId.str],
+                isConnecting: _isConnecting && _selectedDevice == device,
+                isSelected: _selectedDevice == device,
+                onTap: () => _connectToDevice(device),
+              );
+            },
           ),
-        );
-      },
+        ),
+        Padding(
+          padding: EdgeInsets.all(context.padding(8)),
+          child: WearChip(
+            icon: Icons.refresh,
+            label: 'Scan Again',
+            onPressed: _isConnecting ? null : _startScanning,
+          ),
+        ),
+      ],
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Lifecycle
-  // ---------------------------------------------------------------------------
 
   @override
   void dispose() {

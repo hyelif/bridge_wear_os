@@ -18,7 +18,8 @@ android {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.example.bridge_wear_os"
         // For Wear OS, minSdk should be at least 23
-        minSdk = flutter.minSdkVersion
+        // Health Connect requires API 26+
+        minSdk = 26
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

@@ -1,9 +1,10 @@
 import UIKit
 import Flutter
 import CoreBluetooth
+import UserNotifications
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, UNUserNotificationCenterDelegate {
   var bridgeManager: BridgePeripheralManager?
 
   override func application(
@@ -11,6 +12,16 @@ import CoreBluetooth
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     GeneratedPluginRegistrant.register(with: self)
+
+    // Setup notification delegate and request authorization
+    UNUserNotificationCenter.current().delegate = self
+    UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+      if let error = error {
+        print("[NOTIF] Authorization error: \(error)")
+      } else {
+        print("[NOTIF] Authorization granted: \(granted)")
+      }
+    }
 
     // Defer BLE setup to avoid crash on iOS 13+ with SceneDelegate
     // The window may not be ready yet during didFinishLaunching
@@ -59,12 +70,116 @@ import CoreBluetooth
         let isConnected = self.bridgeManager?.subscribedCentral != nil
         result(isConnected)
 
+      case "getAllowedApps":
+        let allowed = UserDefaults.standard.stringArray(forKey: self.allowedAppsKey) ?? []
+        result(allowed)
+
+      case "setAllowedApps":
+        guard let args = call.arguments as? [String: Any],
+              let apps = args["apps"] as? [String] else {
+          result(FlutterError(code: "INVALID_ARGS", message: "Expected {apps: [String]}", details: nil))
+          return
+        }
+        UserDefaults.standard.set(apps, forKey: self.allowedAppsKey)
+        result(true)
+
+      case "getInstalledApps":
+        let commonApps: [[String: String]] = [
+          ["bundleId": "com.apple.MobileSMS", "name": "Messages"],
+          ["bundleId": "com.apple.mobilemail", "name": "Mail"],
+          ["bundleId": "com.apple.mobilephone", "name": "Phone"],
+          ["bundleId": "com.apple.mobilesafari", "name": "Safari"],
+          ["bundleId": "com.apple.mobilecal", "name": "Calendar"],
+          ["bundleId": "com.apple.reminders", "name": "Reminders"],
+          ["bundleId": "com.apple.mobilenotes", "name": "Notes"],
+          ["bundleId": "com.apple.Preferences", "name": "Settings"],
+          ["bundleId": "com.apple.camera", "name": "Camera"],
+          ["bundleId": "com.apple.photos", "name": "Photos"],
+          ["bundleId": "com.apple.mobiletimer", "name": "Clock"],
+          ["bundleId": "com.apple.weather", "name": "Weather"],
+          ["bundleId": "com.apple.mobilestocks", "name": "Stocks"],
+          ["bundleId": "com.apple.mobilemaps", "name": "Maps"],
+          ["bundleId": "com.apple.mobilemusic", "name": "Music"],
+          ["bundleId": "com.apple.Podcasts", "name": "Podcasts"],
+          ["bundleId": "com.apple.news", "name": "News"],
+          ["bundleId": "com.apple.Health", "name": "Health"],
+          ["bundleId": "com.apple.mobileme", "name": "Find My"],
+          ["bundleId": "com.apple.mobilehome", "name": "Home"],
+        ]
+        result(commonApps)
+
+      case "dismissNotification":
+        guard let args = call.arguments as? [String: Any],
+              let bundleId = args["appBundleId"] as? String else {
+          result(FlutterError(code: "INVALID_ARGS", message: "Expected {appBundleId: String}", details: nil))
+          return
+        }
+        UNUserNotificationCenter.current().getDeliveredNotifications { notifications in
+          let identifiers = notifications
+            .filter { $0.request.content.categoryIdentifier == bundleId }
+            .map { $0.request.identifier }
+          UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
+        }
+        result(true)
+
       default:
         result(FlutterMethodNotImplemented)
       }
     }
 
     print("[BLE] Bridge initialized successfully")
+  }
+
+  // MARK: - UNUserNotificationCenterDelegate
+
+  func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              willPresent notification: UNNotification,
+                              withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+    let content = notification.request.content
+    print("[NOTIF] Received: \(content.title) from \(content.userInfo)")
+
+    // Forward to watch via BLE
+    forwardNotificationToWatch(content)
+
+    // Show notification on iPhone too
+    completionHandler([.banner, .sound])
+  }
+
+  func userNotificationCenter(_ center: UNUserNotificationCenter,
+                              didReceive response: UNNotificationResponse,
+                              withCompletionHandler completionHandler: @escaping () -> Void) {
+    completionHandler()
+  }
+
+  // MARK: - Notification Forwarding
+
+  private let allowedAppsKey = "allowed_notification_apps"
+
+  private func forwardNotificationToWatch(_ content: UNNotificationContent) {
+    let payload: [String: Any] = [
+      "title": content.title,
+      "body": content.body,
+      "appName": content.userInfo["appName"] as? String ?? content.categoryIdentifier,
+      "appBundleId": content.userInfo["sourceApp"] as? String ?? "unknown",
+      "timestamp": ISO8601DateFormatter().string(from: Date()),
+    ]
+
+    // Check per-app allowlist before forwarding
+    guard isAppAllowed(content.categoryIdentifier) else {
+      print("[NOTIF] App not in allowlist, skipping: \(content.categoryIdentifier)")
+      return
+    }
+
+    bridgeManager?.sendToWatch([
+      "type": "notification",
+      "payload": payload
+    ])
+  }
+
+  private func isAppAllowed(_ bundleId: String) -> Bool {
+    let allowed = UserDefaults.standard.stringArray(forKey: allowedAppsKey) ?? []
+    // If allowlist is empty, allow all
+    return allowed.isEmpty || allowed.contains(bundleId)
   }
 }
 
@@ -77,11 +192,26 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
   // Notify characteristic
   static let notifyCharUUID = CBUUID(string: "12345678-1234-5678-1234-56789012345c")
 
+  // Advertising power management
+  private enum AdvertiseMode {
+    case lowPower    // Minimal advertisement data, no local name
+    case lowLatency  // Full advertisement data with local name
+  }
+
   private var peripheralManager: CBPeripheralManager?
   private var writeCharacteristic: CBMutableCharacteristic?
   private var notifyCharacteristic: CBMutableCharacteristic?
   fileprivate var subscribedCentral: CBCentral?
   private var isServiceReady = false
+  private var advertiseMode: AdvertiseMode = .lowPower
+
+  // Advertising timeout: stop after 60s if no central connects
+  private var advertisingTimeoutTimer: Timer?
+  private static let advertisingTimeout: TimeInterval = 60
+
+  // Retry: restart advertising after 30s pause if no connection
+  private var retryTimer: Timer?
+  private static let retryPause: TimeInterval = 30
 
   /// Reference to the Flutter method channel for sending messages to Flutter
   var flutterChannel: FlutterMethodChannel?
@@ -108,6 +238,7 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       setupService()
     case .poweredOff:
       print("[BLE] Bluetooth off")
+      cancelAllTimers()
     case .unauthorized:
       print("[BLE] Unauthorized - check Info.plist")
     case .unsupported:
@@ -164,30 +295,91 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
     }
     print("[BLE] Service added successfully!")
     isServiceReady = true
-    startAdvertising()
+    startAdvertising(mode: .lowPower)
   }
 
-  private func startAdvertising() {
+  private func startAdvertising(mode: AdvertiseMode) {
     guard let manager = peripheralManager, !manager.isAdvertising else {
       print("[BLE] Already advertising or manager nil")
       return
     }
 
-    let data: [String: Any] = [
-      CBAdvertisementDataLocalNameKey: "Bridge-iPhone",
+    advertiseMode = mode
+
+    var data: [String: Any] = [
       CBAdvertisementDataServiceUUIDsKey: [BridgePeripheralManager.serviceUUID]
     ]
 
+    switch mode {
+    case .lowPower:
+      // LOW_POWER: advertise only service UUIDs — no local name.
+      // Smaller advertisement packets use less radio time and save battery.
+      print("[BLE] Advertising in LOW_POWER mode (service UUIDs only)")
+    case .lowLatency:
+      // LOW_LATENCY: include local name for faster discovery by the watch.
+      data[CBAdvertisementDataLocalNameKey] = "Bridge-iPhone"
+      print("[BLE] Advertising in LOW_LATENCY mode (with local name)")
+    }
+
     manager.startAdvertising(data)
-    print("[BLE] Advertising as 'Bridge-iPhone'")
   }
 
   func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
     if let error = error {
       print("[BLE] Advertising error: \(error)")
-    } else {
-      print("[BLE] Advertising started!")
+      return
     }
+    print("[BLE] Advertising started!")
+
+    // Start the 60-second advertising timeout.
+    // If no central subscribes before this fires, we stop advertising
+    // and schedule a retry after 30s.
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.advertisingTimeoutTimer?.invalidate()
+      self.advertisingTimeoutTimer = Timer.scheduledTimer(
+        timeInterval: BridgePeripheralManager.advertisingTimeout,
+        target: self,
+        selector: #selector(self.advertisingTimedOut),
+        userInfo: nil,
+        repeats: false
+      )
+    }
+  }
+
+  @objc private func advertisingTimedOut() {
+    print("[BLE] Advertising timed out (60s) — no central connected")
+
+    guard let manager = peripheralManager else { return }
+
+    // Stop advertising
+    if manager.isAdvertising {
+      manager.stopAdvertising()
+      print("[BLE] Advertising stopped due to timeout")
+    }
+
+    // Schedule retry after 30s pause
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.retryTimer?.invalidate()
+      self.retryTimer = Timer.scheduledTimer(
+        timeInterval: BridgePeripheralManager.retryPause,
+        target: self,
+        selector: #selector(self.retryAdvertising),
+        userInfo: nil,
+        repeats: false
+      )
+    }
+    print("[BLE] Retry scheduled in \(BridgePeripheralManager.retryPause)s")
+  }
+
+  @objc private func retryAdvertising() {
+    guard isServiceReady else {
+      print("[BLE] Cannot retry: service not ready")
+      return
+    }
+    print("[BLE] Retrying advertising in LOW_POWER mode")
+    startAdvertising(mode: .lowPower)
   }
 
   // Handle read requests from watch
@@ -231,12 +423,47 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
   func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didSubscribeTo characteristic: CBCharacteristic) {
     print("[BLE] Central subscribed to \(characteristic.uuid)")
     subscribedCentral = central
+
+    // Cancel the advertising timeout — a central is connected
+    cancelAdvertisingTimeout()
+
+    // Switch to LOW_LATENCY advertising for faster reconnection
+    // if the central disconnects briefly.
+    if advertiseMode == .lowPower {
+      print("[BLE] Switching to LOW_LATENCY advertising mode")
+      if peripheralManager?.isAdvertising == true {
+        peripheralManager?.stopAdvertising()
+      }
+      startAdvertising(mode: .lowLatency)
+    }
   }
 
   // Handle unsubscription
   func peripheralManager(_ peripheral: CBPeripheralManager, central: CBCentral, didUnsubscribeFrom characteristic: CBCharacteristic) {
     print("[BLE] Central unsubscribed from \(characteristic.uuid)")
     subscribedCentral = nil
+
+    // Switch back to LOW_POWER advertising to save battery
+    if advertiseMode == .lowLatency {
+      print("[BLE] Switching back to LOW_POWER advertising mode")
+      if peripheralManager?.isAdvertising == true {
+        peripheralManager?.stopAdvertising()
+      }
+      startAdvertising(mode: .lowPower)
+    }
+
+    // Restart the advertising timeout since no central is connected
+    cancelAdvertisingTimeout()
+    DispatchQueue.main.async { [weak self] in
+      guard let self = self else { return }
+      self.advertisingTimeoutTimer = Timer.scheduledTimer(
+        timeInterval: BridgePeripheralManager.advertisingTimeout,
+        target: self,
+        selector: #selector(self.advertisingTimedOut),
+        userInfo: nil,
+        repeats: false
+      )
+    }
   }
 
   // Send notification to watch
@@ -265,5 +492,30 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       "timestamp": ISO8601DateFormatter().string(from: Date())
     ]
     sendToWatch(message)
+  }
+
+  // MARK: - Timer Management
+
+  private func cancelAdvertisingTimeout() {
+    DispatchQueue.main.async { [weak self] in
+      self?.advertisingTimeoutTimer?.invalidate()
+      self?.advertisingTimeoutTimer = nil
+    }
+  }
+
+  private func cancelRetryTimer() {
+    DispatchQueue.main.async { [weak self] in
+      self?.retryTimer?.invalidate()
+      self?.retryTimer = nil
+    }
+  }
+
+  private func cancelAllTimers() {
+    cancelAdvertisingTimeout()
+    cancelRetryTimer()
+  }
+
+  deinit {
+    cancelAllTimers()
   }
 }
