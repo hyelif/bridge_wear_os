@@ -372,11 +372,10 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       guard let self = self else { return }
       self.advertisingTimeoutTimer?.invalidate()
       self.advertisingTimeoutTimer = Timer.scheduledTimer(
-        timeInterval: BridgePeripheralManager.advertisingTimeout,
-        repeats: false
-      ) { [weak self] _ in
-        self?.advertisingTimedOut()
-      }
+        withTimeInterval: BridgePeripheralManager.advertisingTimeout,
+        repeats: false,
+        block: { [weak self] _ in self?.advertisingTimedOut() }
+      )
     }
   }
 
@@ -396,11 +395,10 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
       guard let self = self else { return }
       self.retryTimer?.invalidate()
       self.retryTimer = Timer.scheduledTimer(
-        timeInterval: BridgePeripheralManager.retryPause,
-        repeats: false
-      ) { [weak self] _ in
-        self?.retryAdvertising()
-      }
+        withTimeInterval: BridgePeripheralManager.retryPause,
+        repeats: false,
+        block: { [weak self] _ in self?.retryAdvertising() }
+      )
     }
     print("[BLE] Retry scheduled in \(BridgePeripheralManager.retryPause)s")
   }
@@ -488,11 +486,9 @@ class BridgePeripheralManager: NSObject, CBPeripheralManagerDelegate {
     DispatchQueue.main.async { [weak self] in
       guard let self = self else { return }
       self.advertisingTimeoutTimer = Timer.scheduledTimer(
-        timeInterval: BridgePeripheralManager.advertisingTimeout,
-        target: self,
-        selector: #selector(self.advertisingTimedOut),
-        userInfo: nil,
-        repeats: false
+        withTimeInterval: BridgePeripheralManager.advertisingTimeout,
+        repeats: false,
+        block: { [weak self] _ in self?.advertisingTimedOut() }
       )
     }
   }
